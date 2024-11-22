@@ -79,7 +79,7 @@ export const ChatApp = () => {
     <div className="h-full flex flex-col justify-center gap-4">
       <header className="flex items-center gap-2">
         <Image
-          src="/img/logo/nextjs.svg"
+          src="/images/nextjs.png"
           width={32}
           height={32}
           alt="next.js logo"
@@ -107,7 +107,7 @@ export const ChatApp = () => {
                     {m.role === "user" ? "U" : "A"}
                   </AvatarFallback>
                   {m.role !== "user" ? (
-                    <AvatarImage src="/img/logo/nextjs.svg" />
+                    <AvatarImage src="/images/nextjs.png" />
                   ) : null}
                 </Avatar>
                 <CardTitle>{m.role === "user" ? "User" : "AI"}</CardTitle>
