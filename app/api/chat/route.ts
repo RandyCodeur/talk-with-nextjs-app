@@ -1,10 +1,10 @@
 import { getNeon } from "@/lib/neon";
 import { SYSTEM_MESSAGE } from "@/System-prompt";
 import { openai } from "@ai-sdk/openai";
-import { embed, StreamData, streamText } from "ai";
+import { embed, Message, streamText } from "ai";
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
-import { ChatCompletionMessageParam } from "openai/resources/index.mjs";
+import { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 
 export const runtime = "edge";
 
@@ -41,7 +41,7 @@ const checkUsage = async () => {
 };
 
 export async function POST(req: Request) {
-  const { messages } = await req.json();
+  const { messages } = (await req.json()) as { messages: Message[] };
 
   try {
     await checkUsage();
@@ -117,65 +117,73 @@ export async function POST(req: Request) {
         };
         return mess;
       });
-    const finalMessages: Array<ChatCompletionMessageParam> = [
+
+    interface CoreMessage {
+      role: "system" | "user" | "assistant";
+      content: string;
+    }
+
+    const finalMessages: CoreMessage[] = [
       {
         role: "system",
         content: SYSTEM_MESSAGE,
       },
-      ...otherMessages,
+      ...otherMessages.map((msg) => ({
+        role: msg.role as "user" | "assistant",
+        content: msg.content as string,
+      })),
       {
         role: "system",
-        content: `Context:
-        ${context}`,
+        content: `Context:\n${context}`,
       },
       {
         role: "user",
         content: userPrompt,
       },
     ];
-
     const openAIResponse = await streamText({
       model: openai("gpt-4-turbo"),
-      messages,
+      messages: finalMessages,
     });
 
-    const originalStream = new OpenAIStream(openAIResponse);
+    const originalStream = openAIResponse.toDataStream();
 
-    const editedStream = new ReadableStream({
-      start(controller) {
+    const modifiedResult = new ReadableStream({
+      async start(controller) {
         const reader = originalStream.getReader();
-        read();
 
-        function read() {
-          reader
-            .read()
-            .then(({ done, value }: { done: boolean; value: Uint8Array }) => {
-              if (done) {
-                controller.enqueue(`\n\n### Source
+        const finishReasonChunks = [];
 
-              ${formattedResult
-                .map((r) => `* [${r.url}](${r.url})\n`)
-                .join("")}`);
-                controller.close();
-                return;
-              }
+        while (true) {
+          const { done, value } = await reader.read();
 
-              controller.enqueue(value);
-              read();
-            });
+          if (done) {
+            const customText = '0:"-- Custom string added at the End --"\n';
+            console.log("Adding custom string to client:", customText);
+            controller.enqueue(new TextEncoder().encode(customText));
+
+            for (const chunk of finishReasonChunks) {
+              controller.enqueue(chunk);
+            }
+
+            controller.close();
+            break;
+          }
+
+          const chunkText = new TextDecoder().decode(value);
+          if (chunkText.startsWith("e:") || chunkText.startsWith("d:")) {
+            console.log("Delaying finishReason chunk:", chunkText);
+            finishReasonChunks.push(value);
+          } else {
+            console.log("Streaming normal chunk:", chunkText);
+            controller.enqueue(value);
+          }
         }
       },
     });
 
-    const data = new StreamData();
-
-    const stream = openAIResponse.toDataStream({
-      data,
-      getErrorMessage: (error) => `Error: ${error}`,
-    });
-
-    return new NextResponse(editedStream, {
-      headers: { "Content-Type": "text/event-stream" },
-    });
-  } catch {}
+    return new Response(modifiedResult);
+  } catch (error) {
+    console.error(error);
+  }
 }
